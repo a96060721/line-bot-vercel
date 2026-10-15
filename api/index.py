@@ -43,14 +43,19 @@ def send_line_reply(reply_token, text_message):
     except Exception as e:
         print(f"❌ [LINE 訊息發送失敗]: {e}")
 
-# 3. 透過 Gemini 最新官方 SDK 呼叫
+# 3. 透過 Gemini 最新官方 SDK 呼叫（包含正確的 models/ 路徑與模型備援）
 def call_gemini(prompt_text):
     if not client:
         print("❌ [Gemini Error]: 未能建立 Client，請確認 GEMINI_API_KEY 已於 Vercel 設定！")
         return None
     
-    # 優先使用目前最穩定的 gemini-2.5-flash 或 gemini-2.0-flash
-    models_to_try = ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-1.5-flash']
+    # 精準補上 models/ 路徑前綴與備援別名
+    models_to_try = [
+        'models/gemini-1.5-flash',
+        'models/gemini-1.5-flash-latest',
+        'models/gemini-1.5-pro',
+        'models/gemini-2.0-flash-exp'
+    ]
     
     for model_name in models_to_try:
         try:
