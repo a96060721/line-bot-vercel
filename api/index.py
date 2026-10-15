@@ -3,22 +3,24 @@ import json
 import google.generativeai as genai
 from bottle import Bottle, request, response
 
-# 讀取環境變數
+# 1. 讀取 Vercel 後台環境變數
 LINE_CHANNEL_ACCESS_TOKEN = os.environ.get('LINE_CHANNEL_ACCESS_TOKEN', '').strip()
 GEMINI_API_KEY = os.environ.get('GEMINI_API_KEY', '').strip()
 
-# 初始化 Google Gemini API (官方標準 SDK 驗證，絕不再報 401)
+# 初始化 Google Gemini API (使用官方 SDK)
 if GEMINI_API_KEY:
     genai.configure(api_key=GEMINI_API_KEY)
+else:
+    print("❌ [警告] Vercel 後台未設定 GEMINI_API_KEY 環境變數！")
 
 app = Bottle()
 current_grade_mode = "低年級"
 
-# 1. 發送回應給 LINE
+# 2. 發送回應訊息給 LINE 平台
 def send_line_reply(reply_token, text_message):
     import urllib.request
     if not LINE_CHANNEL_ACCESS_TOKEN:
-        print("錯誤：未設定 LINE_CHANNEL_ACCESS_TOKEN")
+        print("❌ [錯誤] 未偵測到 LINE_CHANNEL_ACCESS_TOKEN 環境變數")
         return
 
     url = 'https://api.line.me/v2/bot/message/reply'
@@ -35,29 +37,32 @@ def send_line_reply(reply_token, text_message):
         with urllib.request.urlopen(req) as res:
             pass
     except Exception as e:
-        print(f"發送 LINE 訊息失敗: {e}")
+        print(f"❌ [LINE 訊息發送失敗]: {e}")
 
-# 2. 透過 Gemini 官方 SDK 呼叫
+# 3. 透過 Gemini 官方 SDK 呼叫（含多模型自動備援與完整 Debug 紀錄）
 def call_gemini(prompt_text):
     if not GEMINI_API_KEY:
-        print("❌ 錯誤：未偵測到 GEMINI_API_KEY")
+        print("❌ [Gemini Error]: GEMINI_API_KEY 為空，無法呼叫 AI API！")
         return None
-    try:
-        model = genai.GenerativeModel('gemini-1.5-flash')
-        response = model.generate_content(prompt_text)
-        return response.text.strip()
-    except Exception as e:
-        print(f"⚠️ Gemini SDK 呼叫失敗: {e}")
+    
+    # 自動依序嘗試目前支援的 Gemini 模型
+    models_to_try = ['gemini-1.5-flash', 'gemini-1.5-pro', 'gemini-2.0-flash-exp']
+    
+    for model_name in models_to_try:
         try:
-            # 備用模型測試
-            model = genai.GenerativeModel('gemini-2.0-flash')
+            model = genai.GenerativeModel(model_name)
             response = model.generate_content(prompt_text)
-            return response.text.strip()
-        except Exception as ex:
-            print(f"❌ 備用模型呼叫亦失敗: {ex}")
-            return None
+            if response and response.text:
+                print(f"✅ [Gemini 成功]: 使用模型 {model_name} 成功取得回應")
+                return response.text.strip()
+        except Exception as e:
+            print(f"⚠️ [Gemini 嘗試失敗]: 模型 {model_name} 發生錯誤 -> {e}")
+            continue
 
-# 3. 字典動態查詢邏輯
+    print("❌ [Gemini 失敗]: 所有模型呼叫皆失敗，請檢查 API Key 是否啟用或有存取限制。")
+    return None
+
+# 4. 中華民國教育部《重編國語辭典修訂本》動態查詢邏輯
 def handle_dict_query(word, cmd):
     if len(word) > 1 and cmd in ["部首", "造詞"]:
         return f"⚠️ 「{word}」本身已是詞語，沒有部首與造詞喔！請改查單字（例如：{word[0]} {cmd}）或輸入「{word} 注音」、「{word} 成語」。"
@@ -78,7 +83,7 @@ def handle_dict_query(word, cmd):
     result = call_gemini(prompt)
     return result if result else "⚠️ 查詢失敗，請確認 API Key 與服務狀態。"
 
-# 4. 國小語境動態造句邏輯
+# 5. 國小語境動態造句邏輯（支援低/中/高年級）
 def handle_sentence_query(pattern, grade):
     grade_rules = {
         "低年級": "請使用低年級學生口語，句子要短，嚴格禁止複雜形容詞與四字成語，用詞簡單自然。",
@@ -106,6 +111,7 @@ def callback():
         body = request.json or {}
         events = body.get('events', [])
 
+        # 當 LINE 按下 Verify 驗證時發送空 events，直接回傳 HTTP 200 OK
         if not events:
             response.status = 200
             return 'OK'
@@ -148,7 +154,7 @@ def callback():
                     send_line_reply(reply_token, reply_text)
 
     except Exception as e:
-        print(f"Error: {e}")
+        print(f"❌ [Callback 系統例外錯誤]: {e}")
 
     response.status = 200
     return 'OK'
