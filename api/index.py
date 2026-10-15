@@ -5,7 +5,8 @@ from bottle import Bottle, request, response
 
 # ===== 金鑰設定 =====
 LINE_CHANNEL_SECRET = 'dc2f37b2d200bb9f461f52ccf66b9aab'
-LINE_CHANNEL_ACCESS_TOKEN = 'XsNB2koXbEx07UwvaYbPhDwjw9K4y8/P+j/jKGmVpiHN+oXp9YRLLiEQmBdjGPq7CM7dbnxSTlJFYtQMs5GMrpX1CDliUxP5FpPV2eGTwNPbmvkd6wRfRmgRFAoFBUxivRk3tQPiQC1OVnQ3U+51oAdB04t89/1O/w1cDnyilFU='
+# 已去除複製時產生的中間空格
+LINE_CHANNEL_ACCESS_TOKEN = '4+ThW7DQSaiTQsBdnvo4pjMIz3R46HnBKYSakTfUTr3uLjq1jJbS9RE2zS3+2x97CM7dbnxSTlJFYtQMs5GMrpX1CDliUxP5FpPV2eGTwNPVP5Uw2pkizqw2UU7t8AHi+dZxlsjs/MjYe9SbppuCDQdB04t89/1O/w1cDnyilFU='
 GEMINI_API_KEY = 'AQ.Ab8RN6K2wPLlZ_Us_SFe0-hZi2dI-N80TDwYJThthNJWpO3gYw'
 
 app = Bottle()
@@ -16,7 +17,7 @@ def send_line_reply(reply_token, text_message):
     url = 'https://api.line.me/v2/bot/message/reply'
     headers = {
         'Content-Type': 'application/json',
-        'Authorization': f'Bearer {LINE_CHANNEL_ACCESS_TOKEN}'
+        'Authorization': f'Bearer {LINE_CHANNEL_ACCESS_TOKEN.strip()}'
     }
     payload = {
         'replyToken': reply_token,
@@ -29,9 +30,9 @@ def send_line_reply(reply_token, text_message):
     except Exception as e:
         print(f"發送 LINE 訊息失敗: {e}")
 
-# 2. 直連 Gemini REST API（Vercel 環境完全不被阻擋）
+# 2. 直連 Gemini REST API
 def call_gemini_rest(prompt_text):
-    url = f'https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={GEMINI_API_KEY}'
+    url = f'https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={GEMINI_API_KEY.strip()}'
     headers = {'Content-Type': 'application/json'}
     payload = {"contents": [{"parts": [{"text": prompt_text}]}]}
     try:
@@ -84,6 +85,7 @@ def handle_sentence_query(pattern, grade):
     result = call_gemini_rest(prompt)
     return result if result else f"1. 公園裡有溜滑梯，{pattern}鞦韆。\n2. 我的書包裡有課本，{pattern}彩色筆。\n3. 媽媽買了蘋果，{pattern}香蕉。"
 
+@app.route('/', method=['GET', 'POST'])
 @app.route('/api/index', method=['GET', 'POST'])
 @app.route('/callback', method=['GET', 'POST'])
 def callback():
@@ -91,6 +93,11 @@ def callback():
     try:
         body = request.json or {}
         events = body.get('events', [])
+
+        # LINE 點擊 Verify 測試時發送空事件，直接回傳 HTTP 200 OK
+        if not events:
+            response.status = 200
+            return 'OK'
 
         for event in events:
             if event.get('type') == 'message' and event.get('message', {}).get('type') == 'text':
@@ -110,14 +117,14 @@ def callback():
                 elif user_msg == "目前模式":
                     reply_text = f"📌 目前造句設定為：【{current_grade_mode}】"
 
-                # B. 教育部辭典指定格式查詢（例如：熱 注音 / 課 部首）
+                # B. 教育部辭典指定格式查詢
                 elif len(user_msg.split()) == 2:
                     parts = user_msg.split()
                     word, cmd = parts[0], parts[1]
                     if cmd in ["注音", "部首", "造詞", "成語"]:
                         reply_text = handle_dict_query(word, cmd)
 
-                # C. 句型造句（例如：...還有... 或 造句 ...還有...）
+                # C. 句型造句
                 if not reply_text and ("..." in user_msg or "…" in user_msg or user_msg.startswith("造句")):
                     pattern = user_msg.replace("造句", "").strip()
                     reply_text = handle_sentence_query(pattern, current_grade_mode)
