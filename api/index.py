@@ -1,21 +1,21 @@
 import os
 import json
-from google import genai
+from openai import OpenAI
 from bottle import Bottle, request, response
 
 # 1. 讀取 Vercel 後台環境變數
 LINE_CHANNEL_ACCESS_TOKEN = os.environ.get('LINE_CHANNEL_ACCESS_TOKEN', '').strip()
-GEMINI_API_KEY = os.environ.get('GEMINI_API_KEY', '').strip()
+OPENAI_API_KEY = os.environ.get('OPENAI_API_KEY', '').strip()
 
-# 初始化 Google Gemini API (使用 2026 最新官方 google-genai SDK)
+# 初始化 OpenAI Client
 client = None
-if GEMINI_API_KEY:
+if OPENAI_API_KEY:
     try:
-        client = genai.Client(api_key=GEMINI_API_KEY)
+        client = OpenAI(api_key=OPENAI_API_KEY)
     except Exception as e:
-        print(f"❌ [Gemini 初始化失敗]: {e}")
+        print(f"❌ [OpenAI 初始化失敗]: {e}")
 else:
-    print("❌ [警告] Vercel 後台未設定 GEMINI_API_KEY 環境變數！")
+    print("❌ [警告] Vercel 後台未設定 OPENAI_API_KEY 環境變數！")
 
 app = Bottle()
 current_grade_mode = "低年級"
@@ -43,35 +43,25 @@ def send_line_reply(reply_token, text_message):
     except Exception as e:
         print(f"❌ [LINE 訊息發送失敗]: {e}")
 
-# 3. 透過 Gemini 最新官方 SDK 呼叫（包含正確的 models/ 路徑與模型備援）
-def call_gemini(prompt_text):
+# 3. 呼叫 OpenAI API（採用極速穩定且便宜的 gpt-4o-mini 模型）
+def call_ai(prompt_text):
     if not client:
-        print("❌ [Gemini Error]: 未能建立 Client，請確認 GEMINI_API_KEY 已於 Vercel 設定！")
+        print("❌ [OpenAI Error]: 未能建立 Client，請確認 OPENAI_API_KEY 已設定！")
         return None
     
-    # 精準補上 models/ 路徑前綴與備援別名
-    models_to_try = [
-        'models/gemini-1.5-flash',
-        'models/gemini-1.5-flash-latest',
-        'models/gemini-1.5-pro',
-        'models/gemini-2.0-flash-exp'
-    ]
-    
-    for model_name in models_to_try:
-        try:
-            response = client.models.generate_content(
-                model=model_name,
-                contents=prompt_text,
-            )
-            if response and response.text:
-                print(f"✅ [Gemini 成功]: 使用模型 {model_name} 成功取得回應")
-                return response.text.strip()
-        except Exception as e:
-            print(f"⚠️ [Gemini 嘗試失敗]: 模型 {model_name} 發生錯誤 -> {e}")
-            continue
-
-    print("❌ [Gemini 失敗]: 所有模型呼叫皆失敗，請檢查 API Key 是否無效。")
-    return None
+    try:
+        completion = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {"role": "user", "content": prompt_text}
+            ],
+            temperature=0.2
+        )
+        if completion and completion.choices:
+            return completion.choices[0].message.content.strip()
+    except Exception as e:
+        print(f"❌ [OpenAI 呼叫失敗]: {e}")
+        return None
 
 # 4. 中華民國教育部《重編國語辭典修訂本》動態查詢邏輯
 def handle_dict_query(word, cmd):
@@ -91,7 +81,7 @@ def handle_dict_query(word, cmd):
 
 請直接輸出結果，嚴禁任何開場白、結尾說明或網址。
 """
-    result = call_gemini(prompt)
+    result = call_ai(prompt)
     return result if result else "⚠️ 查詢失敗，請確認 API Key 與服務狀態。"
 
 # 5. 國小語境動態造句邏輯（支援低/中/高年級）
@@ -110,7 +100,7 @@ def handle_sentence_query(pattern, grade):
 2. 符合台灣國小學生的日常生活經驗（例如學校、家庭、公園、班級生活）。
 3. 直接列出 3 個例句（格式為：1. ... \n2. ... \n3. ...），不要有任何引言或說明。
 """
-    result = call_gemini(prompt)
+    result = call_ai(prompt)
     return result if result else f"1. 公園裡有溜滑梯，{pattern}鞦韆。\n2. 我的書包裡有課本，{pattern}彩色筆。\n3. 媽媽買了蘋果，{pattern}香蕉。"
 
 @app.route('/', method=['GET', 'POST'])
