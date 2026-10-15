@@ -1,15 +1,19 @@
 import os
 import json
-import google.generativeai as genai
+from google import genai
 from bottle import Bottle, request, response
 
 # 1. 讀取 Vercel 後台環境變數
 LINE_CHANNEL_ACCESS_TOKEN = os.environ.get('LINE_CHANNEL_ACCESS_TOKEN', '').strip()
 GEMINI_API_KEY = os.environ.get('GEMINI_API_KEY', '').strip()
 
-# 初始化 Google Gemini API (使用官方 SDK)
+# 初始化 Google Gemini API (使用 2026 最新官方 google-genai SDK)
+client = None
 if GEMINI_API_KEY:
-    genai.configure(api_key=GEMINI_API_KEY)
+    try:
+        client = genai.Client(api_key=GEMINI_API_KEY)
+    except Exception as e:
+        print(f"❌ [Gemini 初始化失敗]: {e}")
 else:
     print("❌ [警告] Vercel 後台未設定 GEMINI_API_KEY 環境變數！")
 
@@ -39,19 +43,21 @@ def send_line_reply(reply_token, text_message):
     except Exception as e:
         print(f"❌ [LINE 訊息發送失敗]: {e}")
 
-# 3. 透過 Gemini 官方 SDK 呼叫（含多模型自動備援與完整 Debug 紀錄）
+# 3. 透過 Gemini 最新官方 SDK 呼叫
 def call_gemini(prompt_text):
-    if not GEMINI_API_KEY:
-        print("❌ [Gemini Error]: GEMINI_API_KEY 為空，無法呼叫 AI API！")
+    if not client:
+        print("❌ [Gemini Error]: 未能建立 Client，請確認 GEMINI_API_KEY 已於 Vercel 設定！")
         return None
     
-    # 自動依序嘗試目前支援的 Gemini 模型
-    models_to_try = ['gemini-1.5-flash', 'gemini-1.5-pro', 'gemini-2.0-flash-exp']
+    # 優先使用目前最穩定的 gemini-2.5-flash 或 gemini-2.0-flash
+    models_to_try = ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-1.5-flash']
     
     for model_name in models_to_try:
         try:
-            model = genai.GenerativeModel(model_name)
-            response = model.generate_content(prompt_text)
+            response = client.models.generate_content(
+                model=model_name,
+                contents=prompt_text,
+            )
             if response and response.text:
                 print(f"✅ [Gemini 成功]: 使用模型 {model_name} 成功取得回應")
                 return response.text.strip()
@@ -59,7 +65,7 @@ def call_gemini(prompt_text):
             print(f"⚠️ [Gemini 嘗試失敗]: 模型 {model_name} 發生錯誤 -> {e}")
             continue
 
-    print("❌ [Gemini 失敗]: 所有模型呼叫皆失敗，請檢查 API Key 是否啟用或有存取限制。")
+    print("❌ [Gemini 失敗]: 所有模型呼叫皆失敗，請檢查 API Key 是否無效。")
     return None
 
 # 4. 中華民國教育部《重編國語辭典修訂本》動態查詢邏輯
@@ -111,7 +117,6 @@ def callback():
         body = request.json or {}
         events = body.get('events', [])
 
-        # 當 LINE 按下 Verify 驗證時發送空 events，直接回傳 HTTP 200 OK
         if not events:
             response.status = 200
             return 'OK'
