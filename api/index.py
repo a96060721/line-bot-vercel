@@ -6,7 +6,7 @@ from bottle import Bottle, request, response
 # ===== 金鑰設定 =====
 LINE_CHANNEL_SECRET = 'dc2f37b2d200bb9f461f52ccf66b9aab'
 # 已去除複製時產生的中間空格
-LINE_CHANNEL_ACCESS_TOKEN = '4+ThW7DQSaiTQsBdnvo4pjMIz3R46HnBKYSakTfUTr3uLjq1jJbS9RE2zS3+2x97CM7dbnxSTlJFYtQMs5GMrpX1CDliUxP5FpPV2eGTwNPVP5Uw2pkizqw2UU7t8AHi+dZxlsjs/MjYe9SbppuCDQdB04t89/1O/w1cDnyilFU='
+LINE_CHANNEL_ACCESS_TOKEN = 'zdEE4HpcbAjYzN7rURAaShAqTJAKXEmXJH0Lo/u1OBngwsun4zhv1nsq7AmTmXHZCM7dbnxSTlJFYtQMs5GMrp X1CDliUxP5FpPV2eGTwNPtFM3zhQ6ATpvQt1UJWts2buSDdG4zlkcKOaoY2/IFJQdB04t89/1O/w1cDnyilFU='
 GEMINI_API_KEY = 'AQ.Ab8RN6K2wPLlZ_Us_SFe0-hZi2dI-N80TDwYJThthNJWpO3gYw'
 
 app = Bottle()
