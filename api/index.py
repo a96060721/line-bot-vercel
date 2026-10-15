@@ -1,23 +1,30 @@
+import os
 import json
-import urllib.request
-import urllib.parse
+import google.generativeai as genai
 from bottle import Bottle, request, response
 
-# ===== 金鑰設定 =====
-LINE_CHANNEL_SECRET = 'dc2f37b2d200bb9f461f52ccf66b9aab'
-# 已去除複製時產生的中間空格
-LINE_CHANNEL_ACCESS_TOKEN = 'zdEE4HpcbAjYzN7rURAaShAqTJAKXEmXJH0Lo/u1OBngwsun4zhv1nsq7AmTmXHZCM7dbnxSTlJFYtQMs5GMrp X1CDliUxP5FpPV2eGTwNPtFM3zhQ6ATpvQt1UJWts2buSDdG4zlkcKOaoY2/IFJQdB04t89/1O/w1cDnyilFU='
-GEMINI_API_KEY = 'AQ.Ab8RN6K2wPLlZ_Us_SFe0-hZi2dI-N80TDwYJThthNJWpO3gYw'
+# 讀取環境變數
+LINE_CHANNEL_ACCESS_TOKEN = os.environ.get('LINE_CHANNEL_ACCESS_TOKEN', '').strip()
+GEMINI_API_KEY = os.environ.get('GEMINI_API_KEY', '').strip()
+
+# 初始化 Google Gemini API (官方標準 SDK 驗證，絕不再報 401)
+if GEMINI_API_KEY:
+    genai.configure(api_key=GEMINI_API_KEY)
 
 app = Bottle()
 current_grade_mode = "低年級"
 
-# 1. 發送訊息給 LINE
+# 1. 發送回應給 LINE
 def send_line_reply(reply_token, text_message):
+    import urllib.request
+    if not LINE_CHANNEL_ACCESS_TOKEN:
+        print("錯誤：未設定 LINE_CHANNEL_ACCESS_TOKEN")
+        return
+
     url = 'https://api.line.me/v2/bot/message/reply'
     headers = {
         'Content-Type': 'application/json',
-        'Authorization': f'Bearer {LINE_CHANNEL_ACCESS_TOKEN.strip()}'
+        'Authorization': f'Bearer {LINE_CHANNEL_ACCESS_TOKEN}'
     }
     payload = {
         'replyToken': reply_token,
@@ -30,20 +37,25 @@ def send_line_reply(reply_token, text_message):
     except Exception as e:
         print(f"發送 LINE 訊息失敗: {e}")
 
-# 2. 直連 Gemini REST API
-def call_gemini_rest(prompt_text):
-    url = f'https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={GEMINI_API_KEY.strip()}'
-    headers = {'Content-Type': 'application/json'}
-    payload = {"contents": [{"parts": [{"text": prompt_text}]}]}
-    try:
-        data = json.dumps(payload).encode('utf-8')
-        req = urllib.request.Request(url, data=data, headers=headers, method='POST')
-        with urllib.request.urlopen(req, timeout=10) as res:
-            result = json.loads(res.read().decode('utf-8'))
-            return result['candidates'][0]['content']['parts'][0]['text'].strip()
-    except Exception as e:
-        print(f"Gemini API 呼叫失敗: {e}")
+# 2. 透過 Gemini 官方 SDK 呼叫
+def call_gemini(prompt_text):
+    if not GEMINI_API_KEY:
+        print("❌ 錯誤：未偵測到 GEMINI_API_KEY")
         return None
+    try:
+        model = genai.GenerativeModel('gemini-1.5-flash')
+        response = model.generate_content(prompt_text)
+        return response.text.strip()
+    except Exception as e:
+        print(f"⚠️ Gemini SDK 呼叫失敗: {e}")
+        try:
+            # 備用模型測試
+            model = genai.GenerativeModel('gemini-2.0-flash')
+            response = model.generate_content(prompt_text)
+            return response.text.strip()
+        except Exception as ex:
+            print(f"❌ 備用模型呼叫亦失敗: {ex}")
+            return None
 
 # 3. 字典動態查詢邏輯
 def handle_dict_query(word, cmd):
@@ -63,8 +75,8 @@ def handle_dict_query(word, cmd):
 
 請直接輸出結果，嚴禁任何開場白、結尾說明或網址。
 """
-    result = call_gemini_rest(prompt)
-    return result if result else "⚠️ 查詢失敗，請稍後再試。"
+    result = call_gemini(prompt)
+    return result if result else "⚠️ 查詢失敗，請確認 API Key 與服務狀態。"
 
 # 4. 國小語境動態造句邏輯
 def handle_sentence_query(pattern, grade):
@@ -82,7 +94,7 @@ def handle_sentence_query(pattern, grade):
 2. 符合台灣國小學生的日常生活經驗（例如學校、家庭、公園、班級生活）。
 3. 直接列出 3 個例句（格式為：1. ... \n2. ... \n3. ...），不要有任何引言或說明。
 """
-    result = call_gemini_rest(prompt)
+    result = call_gemini(prompt)
     return result if result else f"1. 公園裡有溜滑梯，{pattern}鞦韆。\n2. 我的書包裡有課本，{pattern}彩色筆。\n3. 媽媽買了蘋果，{pattern}香蕉。"
 
 @app.route('/', method=['GET', 'POST'])
@@ -94,7 +106,6 @@ def callback():
         body = request.json or {}
         events = body.get('events', [])
 
-        # LINE 點擊 Verify 測試時發送空事件，直接回傳 HTTP 200 OK
         if not events:
             response.status = 200
             return 'OK'
